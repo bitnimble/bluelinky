@@ -439,6 +439,7 @@ export interface VehicleRegisterOptions {
   regId: string;
   id: string;
   generation: string;
+  ccuCCS2ProtocolSupport: number;
 }
 
 export type DeepPartial<T> = {

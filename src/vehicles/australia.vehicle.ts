@@ -56,6 +56,10 @@ export default class AustraliaVehicle extends Vehicle {
     logger.debug(`AU Vehicle ${this.vehicleConfig.id} created`);
   }
 
+  private getVehicleHttpService() {
+    return this.controller.getVehicleHttpService(this.vehicleConfig.ccuCCS2ProtocolSupport);
+  }
+
   /**
    *
    * @param config - Vehicle start configuration for the request
@@ -63,7 +67,7 @@ export default class AustraliaVehicle extends Vehicle {
    * @remarks - not sure if this supports starting ICE vehicles
    */
   public async start(config: VehicleStartOptions): Promise<string> {
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.post(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/control/engine`, {
@@ -87,7 +91,7 @@ export default class AustraliaVehicle extends Vehicle {
   }
 
   public async stop(): Promise<string> {
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.post(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/control/engine`, {
@@ -111,7 +115,7 @@ export default class AustraliaVehicle extends Vehicle {
   }
 
   public async lock(): Promise<string> {
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.post(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/control/door`, {
@@ -132,7 +136,7 @@ export default class AustraliaVehicle extends Vehicle {
   }
 
   public async unlock(): Promise<string> {
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.post(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/control/door`, {
@@ -155,7 +159,7 @@ export default class AustraliaVehicle extends Vehicle {
   }
 
   public async setWindows(config: VehicleWindowsOptions): Promise<string> {
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.post(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/control/windowcurtain`, {
@@ -175,7 +179,7 @@ export default class AustraliaVehicle extends Vehicle {
       ...input,
     };
 
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
 
     try {
       const vehicleStatusResponse = this.updateRates(
@@ -211,63 +215,22 @@ export default class AustraliaVehicle extends Vehicle {
       ...input,
     };
 
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
 
     try {
       const cacheString = statusConfig.refresh ? '' : '/latest';
-      const response = this.updateRates(
-        await http.get(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/status${cacheString}`)
-      );
-      const vehicleStatus = response.body.resMsg;
+      const vehicleUrl = this.vehicleConfig.ccuCCS2ProtocolSupport
+        ? `/api/v2/spa/vehicles/${this.vehicleConfig.id}/ccs2/carstatus${cacheString}`
+        : `/api/v2/spa/vehicles/${this.vehicleConfig.id}/status${cacheString}`;
+      const response = this.updateRates(await http.get(vehicleUrl));
+      const body = response.body.resMsg;
+      if (body == null) {
+        throw new Error('missing vehicle status in response');
+      }
 
-      const parsedStatus: VehicleStatus = {
-        chassis: {
-          hoodOpen: vehicleStatus?.hoodOpen,
-          trunkOpen: vehicleStatus?.trunkOpen,
-          locked: vehicleStatus.doorLock,
-          openDoors: {
-            frontRight: !!vehicleStatus?.doorOpen?.frontRight,
-            frontLeft: !!vehicleStatus?.doorOpen?.frontLeft,
-            backLeft: !!vehicleStatus?.doorOpen?.backLeft,
-            backRight: !!vehicleStatus?.doorOpen?.backRight,
-          },
-          tirePressureWarningLamp: {
-            rearLeft: !!vehicleStatus?.tirePressureLamp?.tirePressureLampRL,
-            frontLeft: !!vehicleStatus?.tirePressureLamp?.tirePressureLampFL,
-            frontRight: !!vehicleStatus?.tirePressureLamp?.tirePressureLampFR,
-            rearRight: !!vehicleStatus?.tirePressureLamp?.tirePressureLampRR,
-            all: !!vehicleStatus?.tirePressureLamp?.tirePressureWarningLampAll,
-          },
-        },
-        climate: {
-          active: vehicleStatus?.airCtrlOn,
-          steeringwheelHeat: !!vehicleStatus?.steerWheelHeat,
-          sideMirrorHeat: false,
-          rearWindowHeat: !!vehicleStatus?.sideBackWindowHeat,
-          defrost: vehicleStatus?.defrost,
-          temperatureSetpoint: tempCodeToCelsius(REGIONS.AU, vehicleStatus?.airTemp?.value),
-          temperatureUnit: vehicleStatus?.airTemp?.unit,
-        },
-        engine: {
-          ignition: vehicleStatus.engine,
-          accessory: vehicleStatus?.acc,
-          rangeGas:
-            vehicleStatus?.evStatus?.drvDistance[0]?.rangeByFuel?.gasModeRange?.value ??
-            vehicleStatus?.dte?.value,
-          // EV
-          range: vehicleStatus?.evStatus?.drvDistance[0]?.rangeByFuel?.totalAvailableRange?.value,
-          rangeEV: vehicleStatus?.evStatus?.drvDistance[0]?.rangeByFuel?.evModeRange?.value,
-          plugedTo: vehicleStatus?.evStatus?.batteryPlugin ?? EVPlugTypes.UNPLUGED,
-          charging: vehicleStatus?.evStatus?.batteryCharge,
-          estimatedCurrentChargeDuration: vehicleStatus?.evStatus?.remainTime2?.atc?.value,
-          estimatedFastChargeDuration: vehicleStatus?.evStatus?.remainTime2?.etc1?.value,
-          estimatedPortableChargeDuration: vehicleStatus?.evStatus?.remainTime2?.etc2?.value,
-          estimatedStationChargeDuration: vehicleStatus?.evStatus?.remainTime2?.etc3?.value,
-          batteryCharge12v: vehicleStatus?.battery?.batSoc,
-          batteryChargeHV: vehicleStatus?.evStatus?.batteryStatus,
-        },
-        lastupdate: vehicleStatus?.time ? parseDate(vehicleStatus?.time) : null,
-      };
+      const parsedStatus = this.vehicleConfig.ccuCCS2ProtocolSupport
+        ? this.parseCCS2VehicleStatus(body)
+        : this.parseVehicleStatus(body);
 
       if (!parsedStatus.engine.range) {
         if (parsedStatus.engine.rangeEV || parsedStatus.engine.rangeGas) {
@@ -276,7 +239,7 @@ export default class AustraliaVehicle extends Vehicle {
         }
       }
 
-      this._status = statusConfig.parsed ? parsedStatus : vehicleStatus;
+      this._status = statusConfig.parsed ? parsedStatus : body;
 
       return this._status;
     } catch (err) {
@@ -284,8 +247,118 @@ export default class AustraliaVehicle extends Vehicle {
     }
   }
 
+  private parseVehicleStatus(body: any): VehicleStatus {
+    return {
+      chassis: {
+        hoodOpen: body.hoodOpen,
+        trunkOpen: body.trunkOpen,
+        locked: body.doorLock,
+        openDoors: {
+          frontRight: !!body.doorOpen?.frontRight,
+          frontLeft: !!body.doorOpen?.frontLeft,
+          backLeft: !!body.doorOpen?.backLeft,
+          backRight: !!body.doorOpen?.backRight,
+        },
+        tirePressureWarningLamp: {
+          rearLeft: !!body.tirePressureLamp?.tirePressureLampRL,
+          frontLeft: !!body.tirePressureLamp?.tirePressureLampFL,
+          frontRight: !!body.tirePressureLamp?.tirePressureLampFR,
+          rearRight: !!body.tirePressureLamp?.tirePressureLampRR,
+          all: !!body.tirePressureLamp?.tirePressureWarningLampAll,
+        },
+      },
+      climate: {
+        active: body.airCtrlOn,
+        steeringwheelHeat: !!body.steerWheelHeat,
+        sideMirrorHeat: false,
+        rearWindowHeat: !!body.sideBackWindowHeat,
+        defrost: body.defrost,
+        temperatureSetpoint: tempCodeToCelsius(REGIONS.AU, body.airTemp?.value),
+        temperatureUnit: body.airTemp?.unit,
+      },
+      engine: {
+        ignition: body.engine,
+        accessory: body.acc,
+        rangeGas:
+          body.evStatus?.drvDistance[0]?.rangeByFuel?.gasModeRange?.value ?? body.dte?.value,
+        // EV
+        range: body.evStatus?.drvDistance[0]?.rangeByFuel?.totalAvailableRange?.value,
+        rangeEV: body.evStatus?.drvDistance[0]?.rangeByFuel?.evModeRange?.value,
+        plugedTo: body.evStatus?.batteryPlugin ?? EVPlugTypes.UNPLUGED,
+        charging: body.evStatus?.batteryCharge,
+        estimatedCurrentChargeDuration: body.evStatus?.remainTime2?.atc?.value,
+        estimatedFastChargeDuration: body.evStatus?.remainTime2?.etc1?.value,
+        estimatedPortableChargeDuration: body.evStatus?.remainTime2?.etc2?.value,
+        estimatedStationChargeDuration: body.evStatus?.remainTime2?.etc3?.value,
+        batteryCharge12v: body.battery?.batSoc,
+        batteryChargeHV: body.evStatus?.batteryStatus,
+      },
+      lastupdate: body.time ? parseDate(body.time) : null,
+    };
+  }
+
+  private parseCCS2VehicleStatus(body: any): VehicleStatus {
+    const vehicleState = body.state?.Vehicle;
+    const axle = vehicleState.Chassis?.Axle;
+    const door = vehicleState.Cabin?.Door;
+    const charging = vehicleState.Green?.ChargingInformation;
+    if (!vehicleState || !axle || !door) {
+      throw new Error('missing vehicle state in vehicle status response');
+    }
+
+    return {
+      chassis: {
+        hoodOpen: vehicleState.Body?.Hood?.Open === 1,
+        trunkOpen: vehicleState.Body?.Trunk?.Open === 1,
+        locked:
+          door.Row1?.Driver?.Lock === 1 &&
+          door.Row1?.Passenger?.Lock === 1 &&
+          door.Row2?.Left?.Lock === 1 &&
+          door.Row2?.Right?.Lock === 1,
+        openDoors: {
+          frontRight: door.Row1?.Driver?.Open === 1,
+          frontLeft: door.Row1?.Passenger?.Open === 1,
+          backLeft: door.Row2?.Left?.Open === 1,
+          backRight: door.Row2?.Right?.Open === 1,
+        },
+        tirePressureWarningLamp: {
+          rearLeft: axle.Row2?.Left?.Tire?.PressureLow === 1,
+          frontLeft: axle.Row1?.Left?.Tire?.PressureLow === 1,
+          frontRight: axle.Row1?.Right?.Tire?.PressureLow === 1,
+          rearRight: axle.Row2?.Right?.Tire?.PressureLow === 1,
+          all: axle.Tire?.PressureLow === 1,
+        },
+      },
+      climate: {
+        active: vehicleState.Cabin?.HVAC?.Row1?.Driver?.Blower?.SpeedLevel !== 0, // `active` is based on whether the driver AC is enabled or not.
+        steeringwheelHeat: vehicleState.Cabin?.SteeringWheel?.Heat?.State === 1,
+        sideMirrorHeat: false, // TODO: find what property this comes from
+        rearWindowHeat: false, // TODO: find what property this comes from
+        defrost: false, // TODO: find what property this comes from. Cabin.Body.Windshield.Front.Defog.State doesn't seem to exist.
+        temperatureSetpoint: vehicleState.Cabin?.HVAC?.Row1?.Driver?.Temperature?.Value,
+        temperatureUnit: vehicleState.Cabin?.HVAC?.Row1?.Driver?.Temperature?.Unit,
+      },
+      engine: {
+        accessory: vehicleState.Electronics?.PowerSupply?.Accessory === 1,
+        ignition: vehicleState.Electronics?.PowerSupply?.Ignition1 === 1, // TODO: figure out what Ignition1 vs Ignition3 is
+        range: vehicleState.Drivetrain?.FuelSystem?.DTE?.Total, // TODO: what units is `range` expected to be in?
+        rangeEV: vehicleState.Drivetrain?.FuelSystem?.DTE?.Total, // TODO: verify that EV vs Gas DTE come from the same property
+        rangeGas: vehicleState.Drivetrain?.FuelSystem?.DTE?.Total,
+        plugedTo: charging?.ConnectorFastening?.State || EVPlugTypes.UNPLUGED,
+        charging: charging?.Charging?.RemainTime > 0,
+        estimatedCurrentChargeDuration: charging?.Charging?.RemainTime,
+        estimatedStationChargeDuration: charging?.EstimatedTime?.Quick,
+        estimatedFastChargeDuration: charging?.EstimatedTime?.Standard, // TODO: verify that "fast" means high voltage AC and "station" means DCFC
+        estimatedPortableChargeDuration: charging?.EstimatedTime?.ICCB,
+        batteryCharge12v: vehicleState.Electronics?.Battery?.Level,
+        batteryChargeHV: vehicleState.Green?.BatteryManagement?.BatteryRemain?.Ratio,
+      },
+      lastupdate: new Date(body.lastUpdateTime),
+    };
+  }
+
   public async odometer(): Promise<VehicleOdometer | null> {
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.post(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/monthlyreport`, {
@@ -309,7 +382,7 @@ export default class AustraliaVehicle extends Vehicle {
   }
 
   public async location(): Promise<VehicleLocation> {
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.get(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/location/park`)
@@ -335,7 +408,7 @@ export default class AustraliaVehicle extends Vehicle {
 
   public async startCharge(): Promise<string> {
     // TODO: test this
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.post(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/control/charge`, {
@@ -359,7 +432,7 @@ export default class AustraliaVehicle extends Vehicle {
 
   public async stopCharge(): Promise<string> {
     // TODO: test this
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.post(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/control/charge`, {
@@ -387,7 +460,7 @@ export default class AustraliaVehicle extends Vehicle {
       month: new Date().getMonth() + 1,
     }
   ): Promise<DeepPartial<VehicleMonthlyReport> | undefined> {
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.post(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/monthlyreport`, {
@@ -573,7 +646,7 @@ export default class AustraliaVehicle extends Vehicle {
    * Warning: Only works on EV
    */
   public async getChargeTargets(): Promise<DeepPartial<VehicleTargetSOC>[] | undefined> {
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       const response = this.updateRates(
         await http.get(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/charge/target`)
@@ -597,7 +670,7 @@ export default class AustraliaVehicle extends Vehicle {
    */
   public async setChargeTargets(limits: { fast: ChargeTarget; slow: ChargeTarget }): Promise<void> {
     // TODO: test this
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     if (
       !POSSIBLE_CHARGE_LIMIT_VALUES.includes(limits.fast) ||
       !POSSIBLE_CHARGE_LIMIT_VALUES.includes(limits.slow)
@@ -628,7 +701,7 @@ export default class AustraliaVehicle extends Vehicle {
    */
   public async setNavigation(poiInformations: EUPOIInformation[]): Promise<void> {
     // TODO: test this
-    const http = await this.controller.getVehicleHttpService();
+    const http = await this.getVehicleHttpService();
     try {
       this.updateRates(
         await http.post(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/location/routes`, {

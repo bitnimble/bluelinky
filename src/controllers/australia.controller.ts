@@ -26,6 +26,7 @@ interface AustraliaVehicleDescription {
   vehicleName: string;
   regDate: string;
   vehicleId: string;
+  ccuCCS2ProtocolSupport?: number;
 }
 
 export class AustraliaController extends SessionController<AustraliaBlueLinkyConfig> {
@@ -270,6 +271,7 @@ export class AustraliaController extends SessionController<AustraliaBlueLinkyCon
             id: v.vehicleId,
             vin: vehicleProfile.vinInfo[0].basic.vin,
             generation: vehicleProfile.vinInfo[0].basic.modelYear,
+            ccuCCS2ProtocolSupport: v.ccuCCS2ProtocolSupport || 0,
           } as VehicleRegisterOptions;
 
           logger.debug(`@AustraliaController.getVehicles: Added vehicle ${vehicleConfig.id}`);
@@ -292,7 +294,9 @@ export class AustraliaController extends SessionController<AustraliaBlueLinkyCon
     }
   }
 
-  public async getVehicleHttpService(): Promise<GotInstance<GotJSONFn>> {
+  public async getVehicleHttpService(
+    ccuCCS2ProtocolSupport: number
+  ): Promise<GotInstance<GotJSONFn>> {
     await this.checkControlToken();
     return got.extend({
       baseUrl: this.environment.baseUrl,
@@ -300,6 +304,7 @@ export class AustraliaController extends SessionController<AustraliaBlueLinkyCon
         ...this.defaultHeaders,
         'Authorization': this.session.controlToken,
         'Stamp': await this.environment.stamp(),
+        'Ccuccs2protocolsupport': ccuCCS2ProtocolSupport,
       },
       json: true,
     });
